@@ -1,4 +1,4 @@
-/* !include https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js */
+/* !include https://cdn.jsdelivr.net/npm/@tabler/core@1.5.0/dist/js/tabler.min.js */
 const nonce = /** @type {HTMLScriptElement} */ (document.currentScript).nonce;
 
 function sqlpage_card() {
@@ -442,10 +442,25 @@ function sqlpage_toast() {
   open_toasts_for_hash(initialized_toasts);
 }
 
+function sqlpage_modal() {
+  // Bootstrap modals use position: fixed and are documented to live as
+  // direct children of <body>
+  // (https://getbootstrap.com/docs/5.3/components/modal/#how-it-works).
+  // SQLPage renders them inside .page, but Tabler 1.5 sets
+  // `contain: layout` on .page, which makes fixed positioning relative to
+  // .page instead of the viewport. The modal then scrolls with the page
+  // content and ends up behind its own backdrop, so its buttons cannot be
+  // clicked. Moving modals to <body> keeps them viewport-fixed.
+  for (const modal of document.querySelectorAll("body .page .modal")) {
+    document.body.appendChild(modal);
+  }
+}
+
 add_init_fn(sqlpage_table);
 add_init_fn(sqlpage_map);
 add_init_fn(sqlpage_card);
 add_init_fn(sqlpage_form);
+add_init_fn(sqlpage_modal);
 add_init_fn(load_scripts);
 add_init_fn(sqlpage_toast);
 window.addEventListener("hashchange", () =>
@@ -479,9 +494,13 @@ function open_modal_for_hash() {
   const bootstrap_modal =
     window.tabler.bootstrap.Modal.getOrCreateInstance(modal);
   bootstrap_modal.show();
-  modal.addEventListener("hidden.bs.modal", () => {
-    window.history.replaceState(null, "", "#");
-  });
+  modal.addEventListener(
+    "hidden.bs.modal",
+    () => {
+      window.history.replaceState(null, "", "#");
+    },
+    { once: true },
+  );
 }
 
 window.addEventListener("hashchange", open_modal_for_hash);

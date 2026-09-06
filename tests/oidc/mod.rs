@@ -1,6 +1,6 @@
 use actix_web::{
     App, HttpResponse, HttpServer, Responder,
-    cookie::Cookie,
+    cookie::{Cookie, SameSite},
     http::{StatusCode, header},
     test,
     web::{self, Data},
@@ -263,6 +263,13 @@ fn get_query_param(url: &Url, name: &str) -> String {
         .to_string()
 }
 
+async fn settle_background_refreshes() {
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 const REDIRECT_COUNT_COOKIE: &str = "sqlpage_oidc_redirect_count";
 const MAX_OIDC_REDIRECTS: u8 = 3;
 
@@ -442,12 +449,22 @@ async fn test_oidc_happy_path() {
         "no-store",
         "the post-login redirect must not re-enter a cached authorization redirect"
     );
+    let set_cookies = extract_set_cookies(callback_resp.headers());
     assert!(
-        extract_set_cookies(callback_resp.headers())
+        set_cookies
             .iter()
             .any(|c| c.name() == REDIRECT_COUNT_COOKIE && c.value().is_empty()),
         "a successful login must clear the redirect counter"
     );
+
+    let auth_cookie = set_cookies
+        .iter()
+        .find(|c| c.name() == "sqlpage_auth")
+        .expect("a successful login must set the auth cookie");
+    assert_eq!(auth_cookie.http_only(), Some(true));
+    assert_eq!(auth_cookie.secure(), Some(true));
+    assert_eq!(auth_cookie.same_site(), Some(SameSite::Lax));
+    assert_eq!(auth_cookie.path(), Some("/"));
 
     let final_resp = request_with_cookies!(app, test::TestRequest::get().uri("/"), cookies);
     assert_eq!(final_resp.status(), StatusCode::OK);
@@ -741,9 +758,21 @@ async fn test_slow_discovery_does_not_block_authenticated_requests() {
         request_with_cookies!(app, test::TestRequest::get().uri(&callback_uri), cookies);
     assert_eq!(callback_resp.status(), StatusCode::SEE_OTHER);
 
+    settle_background_refreshes().await;
+    let count_before = provider.discovery_count();
+
+    let resp = request_with_cookies!(app, test::TestRequest::get().uri("/"), cookies);
+    assert_eq!(resp.status(), StatusCode::OK);
+    settle_background_refreshes().await;
+    assert_eq!(
+        provider.discovery_count(),
+        count_before,
+        "a fresh OIDC snapshot must not trigger a refresh, \
+         otherwise every request hammers the identity provider"
+    );
+
     // Advance time so the OIDC snapshot appears stale.
     // The next request triggers a background refresh.
-    let count_before = provider.discovery_count();
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(3601)).await;
     // Resume real time so the DB pool and background refresh work normally.
@@ -755,7 +784,7 @@ async fn test_slow_discovery_does_not_block_authenticated_requests() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Let the background refresh task complete.
-    tokio::task::yield_now().await;
+    settle_background_refreshes().await;
     assert!(
         provider.discovery_count() > count_before,
         "OIDC provider metadata was not refreshed"
