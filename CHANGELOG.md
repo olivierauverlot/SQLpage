@@ -2,6 +2,7 @@
 
 ## v0.46.1
 
+- Upgraded the bundled ApexCharts from v5.13.0 to [v7.1.0](https://github.com/apexcharts/apexcharts.js/releases/tag/v7.1.0) and the Tabler core from v1.4.0 to v1.5.0. The ApexCharts upgrade fixes logarithmic-axis scaling, stacked baselines on irregular data, and annotations on charts with no data, and ships a smaller default bundle.
 - Fixed a regression introduced in v0.46 that could replace a variable with `NULL` while building a value that also used database expressions and `sqlpage.*` functions. For example, this API request could lose `john.doe` and produce a URL ending at `https://api.example.com/`:
 
   ```sql
